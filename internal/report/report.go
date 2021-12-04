@@ -19,6 +19,7 @@ package report
 import (
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -47,6 +48,7 @@ const (
 	TopProto
 	Traces
 	Tree
+	JSONTree
 	WebList
 )
 
@@ -94,6 +96,8 @@ func Generate(w io.Writer, rpt *Report, obj plugin.ObjTool) error {
 		return printDOT(w, rpt)
 	case Tree:
 		return printTree(w, rpt)
+	case JSONTree:
+		return printJSONTree(w, rpt)
 	case Text:
 		return printText(w, rpt)
 	case Traces:
@@ -1041,6 +1045,115 @@ func callgrindAddress(prevInfo *graph.NodeInfo, curr uint64) string {
 	}
 
 	return abs
+}
+
+// printJSONTree prints a tree-based report as json.
+func printJSONTree(w io.Writer, rpt *Report) error {
+	const separator = "----------------------------------------------------------+-------------"
+	const legend = "      flat  flat%   sum%        cum   cum%   calls calls% + context 	 	 "
+
+	toFraction := func(value, total int64) float64 {
+		var ratio float64
+		if total != 0 {
+			ratio = math.Abs(float64(value) / float64(total))
+		}
+		return ratio
+	}
+
+	// g, origCount, droppedNodes, _ := rpt.newTrimmedGraph()
+	g, _, _, _ := rpt.newTrimmedGraph()
+	rpt.selectOutputUnit(g)
+
+	fmt.Fprintln(w, "{")
+	fmt.Fprintln(w, "\"labels\":{")
+	// fmt.Fprintln(w, strings.Join(reportLabels(rpt, g, origCount, droppedNodes, 0, false), "\n"))
+	fmt.Fprintln(w, "},")
+
+	// fmt.Fprintln(w, separator)
+	// fmt.Fprintln(w, legend)
+	var flatSum int64
+
+	rx := rpt.options.Symbol
+	matched := 0
+	fmt.Fprintln(w, "\"nodes\":[")
+	for i, n := range g.Nodes {
+		if i != 0 {
+			fmt.Fprintf(w, ",\n")
+		}
+		fmt.Fprintln(w, "{")
+		name, flat, cum := n.Info.PrintableName(), n.FlatValue(), n.CumValue()
+
+		// Skip any entries that do not match the regexp (for the "peek" command).
+		if rx != nil && !rx.MatchString(name) {
+			continue
+		}
+		matched++
+
+		//fmt.Fprintln(w, separator)
+
+		// Print incoming edges.
+		inEdges := n.In.Sort()
+		fmt.Fprintln(w, "\"incoming\":[")
+		for j, in := range inEdges {
+			if j != 0 {
+				fmt.Fprintf(w, ",\n")
+			}
+			var inline string
+			if in.Inline {
+				inline = " (inline)"
+			}
+			// fmt.Fprintf(w, "%50s %s |   %s%s\n", rpt.formatValue(in.Weight),
+			// 	measurement.Percentage(in.Weight, cum), in.Src.Info.PrintableName(), inline)
+			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
+				in.Weight, toFraction(in.Weight, cum), in.Src.Info.PrintableName(), inline)
+		}
+		fmt.Fprintln(w, "],")
+
+		// Print current node.
+		flatSum += flat
+		// fmt.Fprintf(w, "%10s %s %s %10s %s                | %s\n",
+		// 	rpt.formatValue(flat),
+		// 	measurement.Percentage(flat, rpt.total),
+		// 	measurement.Percentage(flatSum, rpt.total),
+		// 	rpt.formatValue(cum),
+		// 	measurement.Percentage(cum, rpt.total),
+		// 	name)
+
+		fmt.Fprintf(w, "\"node\":{\"flat\":%d,\"flat_fraction\":%f,\"sum_fraction\":%f,\"cum\":%d,\"cum_fraction\":%f,\"name\":%q},\n",
+			flat,
+			toFraction(flat, rpt.total),
+			toFraction(flatSum, rpt.total),
+			cum,
+			toFraction(cum, rpt.total),
+			name)
+
+		// Print outgoing edges.
+		outEdges := n.Out.Sort()
+		fmt.Fprintln(w, "\"outgoing\":[")
+		for j, out := range outEdges {
+			if j != 0 {
+				fmt.Fprintf(w, ",\n")
+			}
+			var inline string
+			if out.Inline {
+				inline = " (inline)"
+			}
+			// fmt.Fprintf(w, "%50s %s |   %s%s\n", rpt.formatValue(out.Weight),
+			// 	measurement.Percentage(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
+			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
+				out.Weight, toFraction(out.Weight, cum), out.Src.Info.PrintableName(), inline)
+		}
+		fmt.Fprintln(w, "]")
+		fmt.Fprintln(w, "}")
+	}
+	fmt.Fprintln(w, "]}")
+	// if len(g.Nodes) > 0 {
+	// 	fmt.Fprintln(w, separator)
+	// }
+	if rx != nil && matched == 0 {
+		return fmt.Errorf("no matches found for regexp: %s", rx)
+	}
+	return nil
 }
 
 // printTree prints a tree-based report in text form.

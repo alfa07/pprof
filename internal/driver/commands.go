@@ -93,6 +93,7 @@ var pprofCommands = commands{
 	"top":      {report.Text, nil, nil, false, "Outputs top entries in text form", reportHelp("top", true, true)},
 	"traces":   {report.Traces, nil, nil, false, "Outputs all profile samples in text form", ""},
 	"tree":     {report.Tree, nil, nil, false, "Outputs a text rendering of call graph", reportHelp("tree", true, true)},
+	"jsontree": {report.JSONTree, nil, nil, false, "Outputs a json rendering of call graph", reportHelp("jsontree", true, true)},
 
 	// Save binary formats to a file
 	"callgrind": {report.Callgrind, nil, awayFromTTY("callgraph.out"), false, "Outputs a graph in callgrind format", reportHelp("callgrind", false, true)},
