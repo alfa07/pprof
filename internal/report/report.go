@@ -1060,13 +1060,12 @@ func printJSONTree(w io.Writer, rpt *Report) error {
 		return ratio
 	}
 
-	// g, origCount, droppedNodes, _ := rpt.newTrimmedGraph()
-	g, _, _, _ := rpt.newTrimmedGraph()
+	g, origCount, droppedNodes, _ := rpt.newTrimmedGraph()
 	rpt.selectOutputUnit(g)
 
 	fmt.Fprintln(w, "{")
 	fmt.Fprintln(w, "\"labels\":{")
-	// fmt.Fprintln(w, strings.Join(reportLabels(rpt, g, origCount, droppedNodes, 0, false), "\n"))
+	fmt.Fprintln(w, strings.Join(reportJSONLabels(rpt, g, origCount, droppedNodes, 0, false), ",\n"))
 	fmt.Fprintln(w, "},")
 
 	// fmt.Fprintln(w, separator)
@@ -1141,7 +1140,7 @@ func printJSONTree(w io.Writer, rpt *Report) error {
 			// fmt.Fprintf(w, "%50s %s |   %s%s\n", rpt.formatValue(out.Weight),
 			// 	measurement.Percentage(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
 			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
-				out.Weight, toFraction(out.Weight, cum), out.Src.Info.PrintableName(), inline)
+				out.Weight, toFraction(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
 		}
 		fmt.Fprintln(w, "]")
 		fmt.Fprintln(w, "}")
@@ -1221,6 +1220,56 @@ func printTree(w io.Writer, rpt *Report) error {
 		return fmt.Errorf("no matches found for regexp: %s", rx)
 	}
 	return nil
+}
+
+// ProfileJSONLabels returns JSON labels for a profile.
+func ProfileJSONLabels(rpt *Report) []string {
+	label := []string{}
+	prof := rpt.prof
+	o := rpt.options
+	if len(prof.Mapping) > 0 {
+		if prof.Mapping[0].File != "" {
+			label = append(label, fmt.Sprintf("\"file\":%q", filepath.Base(prof.Mapping[0].File)))
+		}
+		if prof.Mapping[0].BuildID != "" {
+			label = append(label, fmt.Sprintf("\"build_id\":%q", prof.Mapping[0].BuildID))
+		}
+	}
+	// Only include comments that do not start with '#'.
+	comments := "\"comments\":["
+	firstComment := true
+	for _, c := range prof.Comments {
+		if !strings.HasPrefix(c, "#") {
+			//label = append(label, c)
+			if !firstComment {
+				comments += ","
+			}
+			firstComment = false
+			comments += fmt.Sprintf("%q", c)
+		}
+	}
+	comments += "]"
+	label = append(label, comments)
+	if o.SampleType != "" {
+		label = append(label, fmt.Sprintf("\"type\":%q", o.SampleType))
+	}
+	if prof.TimeNanos != 0 {
+		const layout = "Jan 2, 2006 at 3:04pm (MST)"
+		label = append(label, fmt.Sprintf("\"time\":%q", time.Unix(0, prof.TimeNanos).Format(layout)))
+	}
+	if prof.DurationNanos != 0 {
+		// duration := measurement.Label(prof.DurationNanos, "nanoseconds")
+		totalNanos, _ := measurement.Scale(rpt.total, o.SampleUnit, "nanoseconds")
+		// var ratio string
+		// if totalUnit == "ns" && totalNanos != 0 {
+		// 	ratio = "(" + measurement.Percentage(int64(totalNanos), prof.DurationNanos) + ")"
+		// }
+		// label = append(label, fmt.Sprintf("Duration: %s, Total samples = %s %s", duration, rpt.formatValue(rpt.total), ratio))
+		label = append(label, fmt.Sprintf("\"duration_ns\":%d", prof.DurationNanos))
+		label = append(label, fmt.Sprintf("\"total_ns\":%f", totalNanos))
+		// , Total samples = %s %s", duration, rpt.formatValue(rpt.total), ratio))
+	}
+	return label
 }
 
 // GetDOT returns a graph suitable for dot processing along with some
@@ -1330,6 +1379,81 @@ func reportLabels(rpt *Report, g *graph.Graph, origCount, droppedNodes, droppedE
 	if fullHeaders {
 		label = append(label, "\nSee https://git.io/JfYMW for how to read the graph")
 	}
+
+	return label
+}
+
+// reportJSONLabels returns JSON formatted labels for a report. Includes
+// profileLabels.
+func reportJSONLabels(rpt *Report, g *graph.Graph, origCount, droppedNodes, droppedEdges int, fullHeaders bool) []string {
+	// nodeFraction := rpt.options.NodeFraction
+	// edgeFraction := rpt.options.EdgeFraction
+	nodeCount := len(g.Nodes)
+
+	var label []string
+	if len(rpt.options.ProfileLabels) > 0 {
+		optLabels := "\"opt_labels\":["
+		for i, l := range rpt.options.ProfileLabels {
+			if i > 0 {
+				optLabels += ","
+			}
+			optLabels += fmt.Sprintf("%q", l)
+		}
+		optLabels += "]"
+		label = append(label, optLabels)
+	} else if fullHeaders || !rpt.options.CompactLabels {
+		label = ProfileJSONLabels(rpt)
+	}
+
+	var flatSum int64
+	for _, n := range g.Nodes {
+		flatSum = flatSum + n.FlatValue()
+	}
+
+	if len(rpt.options.ActiveFilters) > 0 {
+		activeFilters := legendActiveFilters(rpt.options.ActiveFilters)
+		filters := "\"filters\":["
+		for i, f := range activeFilters {
+			if i > 0 {
+				filters += ","
+			}
+			filters += fmt.Sprintf("%q", f)
+		}
+		filters += "]"
+		label = append(label, filters)
+	}
+
+	// label = append(label, fmt.Sprintf("Showing nodes accounting for %s, %s of %s total",
+	// 	rpt.formatValue(flatSum),
+	// 	strings.TrimSpace(measurement.Percentage(flatSum, rpt.total)),
+	// 	rpt.formatValue(rpt.total)))
+	label = append(label, fmt.Sprintf("\"nodes_accounting_for\":%d", flatSum))
+	label = append(label, fmt.Sprintf("\"report_total\":%d", rpt.total))
+
+	if rpt.total != 0 {
+		if droppedNodes > 0 {
+			// label = append(label, genLabel(droppedNodes, "node", "cum",
+			// 	rpt.formatValue(abs64(int64(float64(rpt.total)*nodeFraction)))))
+			label = append(label, fmt.Sprintf("\"dropped_nodes\":%d", droppedNodes))
+		}
+		if droppedEdges > 0 {
+			// label = append(label, genLabel(droppedEdges, "edge", "freq",
+			// 	rpt.formatValue(abs64(int64(float64(rpt.total)*edgeFraction)))))
+			label = append(label, fmt.Sprintf("\"dropped_edges\":%d", droppedEdges))
+		}
+		label = append(label, fmt.Sprintf("\"node_count\":%d", nodeCount))
+		label = append(label, fmt.Sprintf("\"orig_node_count\":%d", origCount))
+		// if nodeCount > 0 && nodeCount < origCount {
+		// 	label = append(label, fmt.Sprintf("Showing top %d nodes out of %d",
+		// 		nodeCount, origCount))
+		// }
+	}
+
+	// Help new users understand the graph.
+	// A new line is intentionally added here to better show this message.
+	// if fullHeaders {
+	// 	label = append(label, "\nSee https://git.io/JfYMW for how to read the graph")
+	// }
 
 	return label
 }
