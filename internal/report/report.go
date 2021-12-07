@@ -1047,6 +1047,26 @@ func callgrindAddress(prevInfo *graph.NodeInfo, curr uint64) string {
 	return abs
 }
 
+const MAX_PARENTS = 20
+
+func extractParents(n *graph.Node) graph.Nodes {
+	visited := make(graph.NodePtrSet)
+	nodeList := []*graph.Node{}
+	ex := n.In.Sort()
+	for i := 0; i < len(ex) && len(nodeList) < MAX_PARENTS; i++ {
+		p := ex[i].Src
+		if _, ok := visited[p]; ok {
+			continue
+		}
+		visited[p] = true
+		nodeList = append(nodeList, p)
+		for _, e := range p.In {
+			ex = append(ex, e)
+		}
+	}
+	return nodeList
+}
+
 // printJSONTree prints a tree-based report as json.
 func printJSONTree(w io.Writer, rpt *Report) error {
 	const separator = "----------------------------------------------------------+-------------"
@@ -1141,6 +1161,16 @@ func printJSONTree(w io.Writer, rpt *Report) error {
 			// 	measurement.Percentage(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
 			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
 				out.Weight, toFraction(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
+		}
+		fmt.Fprintln(w, "],")
+		// Print parents
+		parents := extractParents(n)
+		fmt.Fprintln(w, "\"parents\":[")
+		for j, p := range parents {
+			if j != 0 {
+				fmt.Fprintf(w, ",\n")
+			}
+			fmt.Fprintf(w, "%q", p.Info.PrintableName())
 		}
 		fmt.Fprintln(w, "]")
 		fmt.Fprintln(w, "}")
