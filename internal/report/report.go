@@ -1117,14 +1117,10 @@ func printJSONTree(w io.Writer, rpt *Report) error {
 			if j != 0 {
 				fmt.Fprintf(w, ",\n")
 			}
-			var inline string
-			if in.Inline {
-				inline = " (inline)"
-			}
 			// fmt.Fprintf(w, "%50s %s |   %s%s\n", rpt.formatValue(in.Weight),
 			// 	measurement.Percentage(in.Weight, cum), in.Src.Info.PrintableName(), inline)
-			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
-				in.Weight, toFraction(in.Weight, cum), in.Src.Info.PrintableName(), inline)
+			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%t}",
+				in.Weight, toFraction(in.Weight, cum), in.Src.Info.PrintableName(), in.Inline)
 		}
 		fmt.Fprintln(w, "],")
 
@@ -1153,14 +1149,8 @@ func printJSONTree(w io.Writer, rpt *Report) error {
 			if j != 0 {
 				fmt.Fprintf(w, ",\n")
 			}
-			var inline string
-			if out.Inline {
-				inline = " (inline)"
-			}
-			// fmt.Fprintf(w, "%50s %s |   %s%s\n", rpt.formatValue(out.Weight),
-			// 	measurement.Percentage(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
-			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%q}",
-				out.Weight, toFraction(out.Weight, cum), out.Dest.Info.PrintableName(), inline)
+			fmt.Fprintf(w, "{\"calls\":%d,\"calls_fraction\":%f,\"name\":%q,\"inline\":%t}",
+				out.Weight, toFraction(out.Weight, cum), out.Dest.Info.PrintableName(), out.Inline)
 		}
 		fmt.Fprintln(w, "],")
 		// Print parents
